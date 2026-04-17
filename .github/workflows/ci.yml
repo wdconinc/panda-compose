@@ -1,0 +1,38 @@
+name: Smoke Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  smoke-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Copy default environment
+        run: cp .env.example .env
+
+      - name: Start PanDA stack
+        run: docker compose up -d
+
+      - name: Wait for PanDA server to become healthy
+        run: ./scripts/healthcheck.sh 300
+
+      - name: Verify JEDI is running
+        run: |
+          docker compose ps panda-jedi
+          docker compose logs panda-jedi --tail=20
+
+      - name: Verify Harvester is running
+        run: |
+          docker compose ps harvester
+          docker compose logs harvester --tail=20
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v

@@ -1,0 +1,196 @@
+# PanDA Compose — self-contained PanDA stack for development and CI
+#
+# Component dependency order:
+#   postgres + activemq + mariadb  →  panda-server + panda-jedi  →  harvester
+#
+# Usage:
+#   cp .env.example .env    # fill in secrets
+#   docker compose up -d
+#   ./scripts/healthcheck.sh
+#
+# Container images mirror those used in panda-k8s Helm charts.
+
+services:
+
+  # ────────────────────────────────────────────────────────────────
+  # PostgreSQL — PanDA server + JEDI database
+  # Image ships with the PanDA schema pre-installed.
+  # ────────────────────────────────────────────────────────────────
+  postgres:
+    image: ghcr.io/pandawms/panda-database:latest
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${PANDA_DB_USER:-panda}
+      POSTGRES_PASSWORD: ${PANDA_DB_PASSWORD:-panda_secret}
+      POSTGRES_DB: ${PANDA_DB_NAME:-panda_db}
+    volumes:
+      - panda-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PANDA_DB_USER:-panda} -d ${PANDA_DB_NAME:-panda_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # ────────────────────────────────────────────────────────────────
+  # ActiveMQ — message broker for PanDA server ↔ JEDI communication
+  # ────────────────────────────────────────────────────────────────
+  activemq:
+    image: ghcr.io/pandawms/panda-activemq:latest
+    restart: unless-stopped
+    environment:
+      ACTIVEMQ_PASSWD_panda: ${PANDA_ACTIVEMQ_PASSWD_panda:-panda_mq_secret}
+      ACTIVEMQ_PASSWD_jedi: ${PANDA_ACTIVEMQ_PASSWD_jedi:-jedi_mq_secret}
+    ports:
+      - "61613:61613"   # STOMP (used by panda-server / harvester)
+      - "61616:61616"   # OpenWire
+      - "8161:8161"     # Web console (admin)
+    volumes:
+      - activemq-data:/opt/activemq/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8161/admin/ -u admin:admin || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+  # ────────────────────────────────────────────────────────────────
+  # PanDA server + JEDI (unified image)
+  # HTTP  → localhost:25080
+  # HTTPS → localhost:25443
+  # ────────────────────────────────────────────────────────────────
+  panda-server:
+    image: ghcr.io/pandawms/panda-server:latest
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      activemq:
+        condition: service_healthy
+    environment:
+      # Database
+      PANDA_DB_BACKEND: ${PANDA_DB_BACKEND:-postgres}
+      PANDA_DB_HOST: ${PANDA_DB_HOST:-postgres}
+      PANDA_DB_PORT: ${PANDA_DB_PORT:-5432}
+      PANDA_DB_USER: ${PANDA_DB_USER:-panda}
+      PANDA_DB_PASSWORD: ${PANDA_DB_PASSWORD:-panda_secret}
+      PANDA_DB_NAME: ${PANDA_DB_NAME:-panda_db}
+      PANDA_DB_SCHEMAPANDA: ${PANDA_DB_SCHEMAPANDA:-DOMA_PANDA}
+      PANDA_DB_SCHEMAMETA: ${PANDA_DB_SCHEMAMETA:-DOMA_PANDAMETA}
+      PANDA_DB_SCHEMAPANDAARCH: ${PANDA_DB_SCHEMAPANDAARCH:-DOMA_PANDAARCH}
+      PANDA_DB_SCHEMAJEDI: ${PANDA_DB_SCHEMAJEDI:-DOMA_PANDA}
+      PANDA_DB_SCHEMADEFT: ${PANDA_DB_SCHEMADEFT:-DOMA_DEFT}
+      # Messaging
+      PANDA_ACTIVEMQ_LIST: ${PANDA_ACTIVEMQ_LIST:-activemq:61613}
+      PANDA_ACTIVEMQ_PASSWD_panda: ${PANDA_ACTIVEMQ_PASSWD_panda:-panda_mq_secret}
+      PANDA_ACTIVEMQ_PASSWD_jedi: ${PANDA_ACTIVEMQ_PASSWD_jedi:-jedi_mq_secret}
+      # Server
+      PANDA_AUTH: ${PANDA_AUTH:-None}
+      PANDA_VERIFY_HOST: "off"
+      PANDA_BEHIND_REAL_LB: "1"
+      # Proxy (optional)
+      http_proxy: ${HTTP_PROXY:-}
+      https_proxy: ${HTTPS_PROXY:-}
+    volumes:
+      - ./config/panda/panda_common.cfg:/etc/panda/panda_common.cfg:ro
+      - ./config/panda/panda_server.cfg:/etc/panda/panda_server.cfg:ro
+      - panda-server-logs:/var/log/panda
+      - panda-cache:/var/cache/pandaserver
+    ports:
+      - "25080:80"    # HTTP — used by panda-client
+      - "25443:443"   # HTTPS
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:80/server/panda/isAlive | grep -q 'alive=yes' || exit 1"]
+      interval: 20s
+      timeout: 10s
+      retries: 15
+      start_period: 60s
+
+  # ────────────────────────────────────────────────────────────────
+  # PanDA JEDI — workload management daemon
+  # ────────────────────────────────────────────────────────────────
+  panda-jedi:
+    image: ghcr.io/pandawms/panda-jedi:latest
+    restart: unless-stopped
+    depends_on:
+      panda-server:
+        condition: service_healthy
+    environment:
+      PANDA_DB_BACKEND: ${PANDA_DB_BACKEND:-postgres}
+      PANDA_DB_HOST: ${PANDA_DB_HOST:-postgres}
+      PANDA_DB_PORT: ${PANDA_DB_PORT:-5432}
+      PANDA_DB_USER: ${PANDA_DB_USER:-panda}
+      PANDA_DB_PASSWORD: ${PANDA_DB_PASSWORD:-panda_secret}
+      PANDA_DB_NAME: ${PANDA_DB_NAME:-panda_db}
+      PANDA_DB_SCHEMAPANDA: ${PANDA_DB_SCHEMAPANDA:-DOMA_PANDA}
+      PANDA_DB_SCHEMAMETA: ${PANDA_DB_SCHEMAMETA:-DOMA_PANDAMETA}
+      PANDA_DB_SCHEMAPANDAARCH: ${PANDA_DB_SCHEMAPANDAARCH:-DOMA_PANDAARCH}
+      PANDA_DB_SCHEMAJEDI: ${PANDA_DB_SCHEMAJEDI:-DOMA_PANDA}
+      PANDA_DB_SCHEMADEFT: ${PANDA_DB_SCHEMADEFT:-DOMA_DEFT}
+      PANDA_ACTIVEMQ_LIST: ${PANDA_ACTIVEMQ_LIST:-activemq:61613}
+      PANDA_ACTIVEMQ_PASSWD_panda: ${PANDA_ACTIVEMQ_PASSWD_panda:-panda_mq_secret}
+      PANDA_ACTIVEMQ_PASSWD_jedi: ${PANDA_ACTIVEMQ_PASSWD_jedi:-jedi_mq_secret}
+      PANDA_URL: ${PANDA_URL:-http://panda-server:80/server/panda}
+      PANDA_URL_SSL: ${PANDA_URL_SSL:-https://panda-server:443/server/panda}
+      PANDA_VERIFY_HOST: "off"
+      http_proxy: ${HTTP_PROXY:-}
+      https_proxy: ${HTTPS_PROXY:-}
+    volumes:
+      - ./config/panda/panda_jedi.cfg:/etc/panda/panda_jedi.cfg:ro
+      - panda-jedi-logs:/var/log/panda
+
+  # ────────────────────────────────────────────────────────────────
+  # MariaDB — Harvester database
+  # ────────────────────────────────────────────────────────────────
+  mariadb:
+    image: bitnami/mariadb:latest
+    restart: unless-stopped
+    environment:
+      MARIADB_USER: ${HARVESTER_DB_USER:-harvester}
+      MARIADB_PASSWORD: ${HARVESTER_DB_PASSWORD:-harvester_secret}
+      MARIADB_DATABASE: ${HARVESTER_DB_NAME:-harvester_db}
+      MARIADB_ROOT_PASSWORD: ${HARVESTER_DB_PASSWORD:-harvester_secret}
+    volumes:
+      - harvester-db-data:/bitnami/mariadb
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -u${HARVESTER_DB_USER:-harvester} -p${HARVESTER_DB_PASSWORD:-harvester_secret} --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # ────────────────────────────────────────────────────────────────
+  # Harvester — resource-facing pilot submission service
+  # ────────────────────────────────────────────────────────────────
+  harvester:
+    image: ghcr.io/hsf/harvester:latest
+    restart: unless-stopped
+    depends_on:
+      panda-server:
+        condition: service_healthy
+      mariadb:
+        condition: service_healthy
+    environment:
+      PANDA_URL: ${PANDA_URL:-http://panda-server:80/server/panda}
+      PANDA_URL_SSL: ${PANDA_URL_SSL:-https://panda-server:443/server/panda}
+      PANDA_AUTH: ${PANDA_AUTH:-None}
+      PANDA_VERIFY_HOST: "off"
+      HARVESTER_DB_USER: ${HARVESTER_DB_USER:-harvester}
+      HARVESTER_DB_PASSWORD: ${HARVESTER_DB_PASSWORD:-harvester_secret}
+      HARVESTER_DB_NAME: ${HARVESTER_DB_NAME:-harvester_db}
+      HARVESTER_DB_HOST: mariadb
+      HARVESTER_EXPERIMENT: ${HARVESTER_EXPERIMENT:-wlcg}
+      http_proxy: ${HTTP_PROXY:-}
+      https_proxy: ${HTTPS_PROXY:-}
+    volumes:
+      - ./config/harvester/panda_harvester.cfg:/etc/harvester/panda_harvester.cfg:ro
+      - ./config/harvester/panda_queues.cfg:/etc/harvester/panda_queues.cfg:ro
+      - harvester-logs:/var/log/harvester
+      - harvester-workdir:/harvester
+
+volumes:
+  panda-db-data:
+  panda-server-logs:
+  panda-jedi-logs:
+  panda-cache:
+  activemq-data:
+  harvester-db-data:
+  harvester-logs:
+  harvester-workdir:
