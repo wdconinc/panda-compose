@@ -14,6 +14,7 @@ import sys
 
 os.environ.setdefault("PANDA_URL", "http://localhost:25080/server/panda")
 os.environ.setdefault("PANDA_URL_SSL", os.environ["PANDA_URL"])
+os.environ.setdefault("X509_USER_PROXY", "/dev/null")
 
 try:
     from pandaclient import Client

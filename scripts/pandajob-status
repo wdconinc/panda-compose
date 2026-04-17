@@ -18,6 +18,7 @@ import sys
 
 os.environ.setdefault("PANDA_URL", "http://localhost:25080/server/panda")
 os.environ.setdefault("PANDA_URL_SSL", os.environ["PANDA_URL"])
+os.environ.setdefault("X509_USER_PROXY", "/dev/null")
 
 try:
     from pandaclient import Client
@@ -47,15 +48,27 @@ def main():
         print(f"ERROR: no job information returned for ID {job_id}", file=sys.stderr)
         sys.exit(1)
 
+    def _str(val):
+        """Convert NULL DB strings to empty string."""
+        v = getattr(job, val, "") or ""
+        return "" if str(v) == "NULL" else str(v)
+
+    def _int(val):
+        v = getattr(job, val, 0)
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return 0
+
     result = {
         "jobID": job_id,
-        "jobStatus": getattr(job, "jobStatus", "unknown"),
-        "exeErrorCode": getattr(job, "exeErrorCode", 0) or 0,
-        "exeErrorDiag": getattr(job, "exeErrorDiag", "") or "",
-        "pilotErrorCode": getattr(job, "pilotErrorCode", 0) or 0,
-        "pilotErrorDiag": getattr(job, "pilotErrorDiag", "") or "",
-        "taskBufferErrorCode": getattr(job, "taskBufferErrorCode", 0) or 0,
-        "taskBufferErrorDiag": getattr(job, "taskBufferErrorDiag", "") or "",
+        "jobStatus": _str("jobStatus") or "unknown",
+        "exeErrorCode": _int("exeErrorCode"),
+        "exeErrorDiag": _str("exeErrorDiag"),
+        "pilotErrorCode": _int("pilotErrorCode"),
+        "pilotErrorDiag": _str("pilotErrorDiag"),
+        "taskBufferErrorCode": _int("taskBufferErrorCode"),
+        "taskBufferErrorDiag": _str("taskBufferErrorDiag"),
     }
 
     print(json.dumps(result))

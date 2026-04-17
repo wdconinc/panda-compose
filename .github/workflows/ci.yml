@@ -33,6 +33,52 @@ jobs:
           docker compose ps harvester
           docker compose logs harvester --tail=20
 
+      - name: Install panda-client
+        run: pip install panda-client
+
+      - name: Integration test — submit, status, kill
+        env:
+          PANDA_URL: http://localhost:25080/server/panda
+          PANDA_URL_SSL: http://localhost:25080/server/panda
+          X509_USER_PROXY: /dev/null
+        run: |
+          echo '#!/bin/bash' > /tmp/panda_ci_test.sh
+          echo 'echo "CI integration test job"' >> /tmp/panda_ci_test.sh
+          chmod +x /tmp/panda_ci_test.sh
+
+          echo "=== Submitting job ==="
+          JOB_ID=$(python3 scripts/pandajob-submit \
+            --site TEST_SITE \
+            --script /tmp/panda_ci_test.sh \
+            --name ci-integration-test)
+          echo "Submitted PanDA job ID: $JOB_ID"
+
+          if ! [[ "$JOB_ID" =~ ^[0-9]+$ ]]; then
+            echo "ERROR: expected integer job ID, got: $JOB_ID"
+            exit 1
+          fi
+
+          echo "=== Querying status ==="
+          STATUS_JSON=$(python3 scripts/pandajob-status "$JOB_ID")
+          echo "Status: $STATUS_JSON"
+
+          JOB_STATUS=$(echo "$STATUS_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['jobStatus'])")
+          echo "Job status: $JOB_STATUS"
+
+          case "$JOB_STATUS" in
+            defined|waiting|assigned|activated|sent|starting|running|merging|transferring|finished|failed|cancelled)
+              echo "OK: job status '$JOB_STATUS' is a valid PanDA state"
+              ;;
+            *)
+              echo "ERROR: unexpected job status '$JOB_STATUS'"
+              exit 1
+              ;;
+          esac
+
+          echo "=== Killing job ==="
+          python3 scripts/pandajob-kill "$JOB_ID"
+          echo "Kill command completed (job may already be terminal)"
+
       - name: Tear down
         if: always()
         run: docker compose down -v

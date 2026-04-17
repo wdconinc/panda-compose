@@ -21,6 +21,8 @@ import sys
 # Allow override via environment for the dev stack.
 os.environ.setdefault("PANDA_URL", "http://localhost:25080/server/panda")
 os.environ.setdefault("PANDA_URL_SSL", os.environ["PANDA_URL"])
+# Suppress "No valid grid proxy certificate found" noise from pandaclient.
+os.environ.setdefault("X509_USER_PROXY", "/dev/null")
 
 try:
     from pandaclient import Client, JobSpec
@@ -59,18 +61,25 @@ def main():
     job.minRamCount = args.memory
     job.maxDiskCount = 1000
     job.ipConnectivity = "yes"
+    # jobDefinitionID has a NOT NULL constraint in the PanDA schema.
+    job.jobDefinitionID = 1
 
     status, job_ids = Client.submitJobs([job], verbose=False)
     if status != 0 or not job_ids:
         print(f"ERROR: submitJobs failed with status {status}", file=sys.stderr)
         sys.exit(1)
 
-    job_id = job_ids[0]
-    if job_id is None or job_id < 0:
+    # submitJobs returns a list of [pandaID, serialNo, jobName] per job.
+    first = job_ids[0]
+    if isinstance(first, (list, tuple)):
+        job_id = first[0]
+    else:
+        job_id = first
+    if job_id is None or str(job_id) == "NULL" or int(job_id) < 0:
         print(f"ERROR: invalid PanDA job ID returned: {job_id}", file=sys.stderr)
         sys.exit(1)
 
-    print(job_id)
+    print(int(job_id))
 
 
 if __name__ == "__main__":
