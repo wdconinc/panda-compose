@@ -34,7 +34,7 @@ jobs:
           docker compose logs harvester --tail=20
 
       - name: Install panda-client
-        run: pip install panda-client
+        run: pip install --user panda-client
 
       - name: Integration test — submit, status, kill
         env:
