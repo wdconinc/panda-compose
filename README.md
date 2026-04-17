@@ -87,7 +87,82 @@ Point `panda_url` in your jacamar-ci TOML config at `http://localhost:25080/serv
 and use the `PANDA_COMPOSE_LOCAL` queue name. See the jacamar-ci PanDA executor
 documentation for full configuration details.
 
+## Submitting and managing jobs
+
+The `scripts/` directory contains three Python wrapper scripts that talk to the PanDA
+REST API via [panda-client](https://pypi.org/project/panda-client/).
+
+### Prerequisites
+
+```bash
+pip install panda-client
+```
+
+The scripts read the server URL from environment variables (the dev-stack defaults are
+already baked in, so the exports below are only needed if you changed the ports):
+
+```bash
+export PANDA_URL=http://localhost:25080/server/panda
+export PANDA_URL_SSL=http://localhost:25080/server/panda
+export X509_USER_PROXY=/dev/null   # suppress grid-proxy noise in the dev stack
+```
+
+### Submit a job
+
+```bash
+JOB_ID=$(python3 scripts/pandajob-submit \
+    --site  TEST_SITE \
+    --script /path/to/myjob.sh \
+    --name  my-test-job)
+echo "Submitted PanDA job $JOB_ID"
+```
+
+| Option | Description |
+|---|---|
+| `--site SITE` | PanDA compute site / queue name (e.g. `TEST_SITE`, `PANDA_COMPOSE_LOCAL`) |
+| `--script PATH` | Path to the shell script to execute |
+| `--name NAME` | Human-readable job name (default: `jacamar-ci-job`) |
+| `--cores N` | CPU cores requested (default: 1) |
+| `--memory MB` | Memory in MB (default: 2000) |
+| `--walltime S` | Wall-clock limit in seconds (default: 3600) |
+
+On success a single integer job ID is printed to stdout. In the dev stack without a
+real compute backend the job will move to `failed` immediately — that is expected.
+
+### Query job status
+
+```bash
+python3 scripts/pandajob-status $JOB_ID
+```
+
+Prints a JSON object to stdout:
+
+```json
+{
+  "jobID": 7,
+  "jobStatus": "failed",
+  "exeErrorCode": 0,
+  "exeErrorDiag": "",
+  "pilotErrorCode": 0,
+  "pilotErrorDiag": "",
+  "taskBufferErrorCode": 0,
+  "taskBufferErrorDiag": ""
+}
+```
+
+Known `jobStatus` values: `defined`, `waiting`, `assigned`, `activated`, `sent`,
+`starting`, `running`, `merging`, `transferring`, `finished`, `failed`, `cancelled`.
+
+### Cancel a job
+
+```bash
+python3 scripts/pandajob-kill $JOB_ID
+```
+
+Exits 0 even if the job is already in a terminal state.
+
 ## CI
 
 A GitHub Actions smoke-test workflow (`.github/workflows/ci.yml`) starts the full stack
-on every push and PR, runs the healthcheck, and verifies all services are up.
+on every push and PR, runs the healthcheck, and exercises the full submit → status →
+kill job lifecycle.
