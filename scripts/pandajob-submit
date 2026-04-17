@@ -1,0 +1,77 @@
+#!/usr/bin/env python3
+"""
+pandajob-submit — submit a shell script as a PanDA job and print the job ID.
+
+Usage:
+    pandajob-submit --site SITE --script SCRIPT [--name NAME]
+
+Environment:
+    PANDA_URL        PanDA server URL (default: http://localhost:25080/server/panda)
+    PANDA_URL_SSL    PanDA server HTTPS URL
+
+Exit codes:
+    0  success — job ID is printed to stdout
+    1  submission failure
+"""
+import argparse
+import json
+import os
+import sys
+
+# Allow override via environment for the dev stack.
+os.environ.setdefault("PANDA_URL", "http://localhost:25080/server/panda")
+os.environ.setdefault("PANDA_URL_SSL", os.environ["PANDA_URL"])
+
+try:
+    from pandaclient import Client, JobSpec
+except ImportError as exc:
+    print(f"ERROR: panda-client is not installed: {exc}", file=sys.stderr)
+    sys.exit(1)
+
+
+def parse_args():
+    p = argparse.ArgumentParser(description="Submit a job script to PanDA")
+    p.add_argument("--site", required=True, help="PanDA compute site (queue name)")
+    p.add_argument("--script", required=True, help="Path to the job script to execute")
+    p.add_argument("--name", default="jacamar-ci-job", help="Job name")
+    p.add_argument("--cores", type=int, default=1, help="Number of CPU cores")
+    p.add_argument("--memory", type=int, default=2000, help="Memory in MB")
+    p.add_argument("--walltime", type=int, default=3600, help="Walltime in seconds")
+    return p.parse_args()
+
+
+def main():
+    args = parse_args()
+
+    script_path = os.path.abspath(args.script)
+    if not os.path.isfile(script_path):
+        print(f"ERROR: script not found: {script_path}", file=sys.stderr)
+        sys.exit(1)
+
+    job = JobSpec.JobSpec()
+    job.jobName = args.name
+    job.computingSite = args.site
+    job.transformation = "/bin/bash"
+    job.jobParameters = script_path
+    job.prodSourceLabel = "test"
+    job.processingType = "jacamar-ci"
+    job.maxCpuCount = args.cores
+    job.minRamCount = args.memory
+    job.maxDiskCount = 1000
+    job.ipConnectivity = "yes"
+
+    status, job_ids = Client.submitJobs([job], verbose=False)
+    if status != 0 or not job_ids:
+        print(f"ERROR: submitJobs failed with status {status}", file=sys.stderr)
+        sys.exit(1)
+
+    job_id = job_ids[0]
+    if job_id is None or job_id < 0:
+        print(f"ERROR: invalid PanDA job ID returned: {job_id}", file=sys.stderr)
+        sys.exit(1)
+
+    print(job_id)
+
+
+if __name__ == "__main__":
+    main()

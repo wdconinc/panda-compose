@@ -1,0 +1,45 @@
+#!/usr/bin/env python3
+"""
+pandajob-kill — kill a PanDA job.
+
+Usage:
+    pandajob-kill JOB_ID
+
+Exit codes:
+    0  success (or already terminal)
+    1  failure
+"""
+import os
+import sys
+
+os.environ.setdefault("PANDA_URL", "http://localhost:25080/server/panda")
+os.environ.setdefault("PANDA_URL_SSL", os.environ["PANDA_URL"])
+
+try:
+    from pandaclient import Client
+except ImportError as exc:
+    print(f"ERROR: panda-client is not installed: {exc}", file=sys.stderr)
+    sys.exit(1)
+
+
+def main():
+    if len(sys.argv) != 2:
+        print(f"Usage: {sys.argv[0]} JOB_ID", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        job_id = int(sys.argv[1])
+    except ValueError:
+        print(f"ERROR: invalid job ID: {sys.argv[1]!r}", file=sys.stderr)
+        sys.exit(1)
+
+    status, output = Client.killJobs([job_id], verbose=False)
+    if status != 0:
+        print(f"ERROR: killJobs failed with status {status}: {output}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Killed job {job_id}")
+
+
+if __name__ == "__main__":
+    main()

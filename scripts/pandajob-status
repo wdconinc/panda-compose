@@ -1,0 +1,65 @@
+#!/usr/bin/env python3
+"""
+pandajob-status — query the status of a PanDA job and print a JSON object.
+
+Usage:
+    pandajob-status JOB_ID
+
+Output (stdout):
+    {"jobID": 12345, "jobStatus": "running", "exeErrorCode": 0, "exeErrorDiag": ""}
+
+Exit codes:
+    0  success
+    1  query failure
+"""
+import json
+import os
+import sys
+
+os.environ.setdefault("PANDA_URL", "http://localhost:25080/server/panda")
+os.environ.setdefault("PANDA_URL_SSL", os.environ["PANDA_URL"])
+
+try:
+    from pandaclient import Client
+except ImportError as exc:
+    print(f"ERROR: panda-client is not installed: {exc}", file=sys.stderr)
+    sys.exit(1)
+
+
+def main():
+    if len(sys.argv) != 2:
+        print(f"Usage: {sys.argv[0]} JOB_ID", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        job_id = int(sys.argv[1])
+    except ValueError:
+        print(f"ERROR: invalid job ID: {sys.argv[1]!r}", file=sys.stderr)
+        sys.exit(1)
+
+    status, jobs = Client.getJobStatus([job_id], verbose=False)
+    if status != 0 or not jobs:
+        print(f"ERROR: getJobStatus failed with status {status}", file=sys.stderr)
+        sys.exit(1)
+
+    job = jobs[0]
+    if job is None:
+        print(f"ERROR: no job information returned for ID {job_id}", file=sys.stderr)
+        sys.exit(1)
+
+    result = {
+        "jobID": job_id,
+        "jobStatus": getattr(job, "jobStatus", "unknown"),
+        "exeErrorCode": getattr(job, "exeErrorCode", 0) or 0,
+        "exeErrorDiag": getattr(job, "exeErrorDiag", "") or "",
+        "pilotErrorCode": getattr(job, "pilotErrorCode", 0) or 0,
+        "pilotErrorDiag": getattr(job, "pilotErrorDiag", "") or "",
+        "taskBufferErrorCode": getattr(job, "taskBufferErrorCode", 0) or 0,
+        "taskBufferErrorDiag": getattr(job, "taskBufferErrorDiag", "") or "",
+    }
+
+    print(json.dumps(result))
+
+
+if __name__ == "__main__":
+    main()
