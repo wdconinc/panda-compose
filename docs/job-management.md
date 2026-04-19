@@ -96,13 +96,20 @@ Exits 0 even if the job is already in a terminal state.
 
 ## Job lifecycle timing
 
-A typical job submitted with `/bin/echo` or `/bin/true` follows this timeline:
+A typical job submitted with `/bin/echo` or `/bin/true` follows this state progression:
 
-```
-defined  ──(30-90s JEDI cycle)──►  activated
-activated ──(~10s Harvester)─────►  sent → starting
-starting  ──(worker runs)─────────►  transferring
-transferring ──(adder loop, ≤6min)──►  finished
+```mermaid
+stateDiagram-v2
+    [*] --> defined : submitJob()
+    defined --> activated : JEDI JobGenerator\n(30–90 s)
+    activated --> sent : Harvester getJobs()\n(~10 s)
+    sent --> starting : worker launched
+    starting --> running : worker reports in
+    running --> transferring : worker completes\n(~5 s)
+    transferring --> finished : adder daemon\n(up to 6 min)
+    transferring --> failed : non-zero exit code
+    finished --> [*]
+    failed --> [*]
 ```
 
 Total end-to-end: **2–8 minutes**. The adder daemon loop that transitions jobs from

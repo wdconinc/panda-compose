@@ -13,44 +13,60 @@ external dependencies (no Rucio, no ATLAS grid services, no token broker).
 
 ## Service topology
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│  Docker Compose network                                     │
-│                                                             │
-│  ┌──────────┐   ┌──────────┐   ┌──────────┐                │
-│  │ postgres │   │activemq  │   │ mariadb  │                │
-│  │ (PanDA   │   │(STOMP/   │   │(Harvester│                │
-│  │  schema) │   │ OpenWire)│   │   DB)    │                │
-│  └────┬─────┘   └────┬─────┘   └────┬─────┘                │
-│       │              │              │                       │
-│  ┌────▼──────────────▼──┐     ┌─────▼──────────────┐       │
-│  │    panda-server      │     │      harvester      │       │
-│  │  (REST API / httpd)  │◄────┤  (subprocess jobs) │       │
-│  └─────────┬────────────┘     └────────────────────┘       │
-│            │                                                │
-│  ┌─────────▼────────────┐                                   │
-│  │      panda-jedi      │                                   │
-│  │  (workload manager)  │                                   │
-│  └──────────────────────┘                                   │
-│                                                             │
-│  ┌──────────────────────┐                                   │
-│  │   init (one-shot)    │  registers PANDA_COMPOSE_LOCAL    │
-│  └──────────────────────┘  queue in schedconfig            │
-└─────────────────────────────────────────────────────────────┘
-         ▲
-         │  http://localhost:25080
-    panda-client / tools under test
+```mermaid
+graph TD
+    client([panda-client / tools under test])
+
+    subgraph compose["Docker Compose network"]
+        postgres[(postgres\nPanDA schema)]
+        activemq[activemq\nSTOMP / OpenWire]
+        mariadb[(mariadb\nHarvester DB)]
+        init[/init\none-shot/]
+        server[panda-server\nREST API / httpd]
+        jedi[panda-jedi\nworkload manager]
+        harvester[harvester\nsubprocess jobs]
+    end
+
+    postgres -->|healthy| server
+    activemq -->|healthy| server
+    postgres -->|healthy| init
+    server   -->|healthy| init
+    init     -->|completed| jedi
+    server   -->|healthy| jedi
+    server   -->|healthy| harvester
+    mariadb  -->|healthy| harvester
+
+    harvester <-->|REST API| server
+    client    -->|"http://localhost:25080"| server
 ```
 
 ## Service dependency order
 
-| Phase | Services | Condition |
-|---|---|---|
-| 1 | `postgres`, `activemq`, `mariadb` | health checks pass |
-| 2 | `panda-server` | `postgres` + `activemq` healthy |
-| 2 | `init` (one-shot) | `postgres` + `panda-server` healthy |
-| 3 | `panda-jedi` | `panda-server` healthy + `init` succeeded |
-| 3 | `harvester` | `panda-server` + `mariadb` healthy |
+```mermaid
+graph LR
+    subgraph p1["Phase 1 — infrastructure"]
+        postgres[(postgres)]
+        activemq[activemq]
+        mariadb[(mariadb)]
+    end
+    subgraph p2["Phase 2 — server & init"]
+        server[panda-server]
+        init[/init/]
+    end
+    subgraph p3["Phase 3 — workers"]
+        jedi[panda-jedi]
+        harvester[harvester]
+    end
+
+    postgres  -->|healthy| server
+    activemq  -->|healthy| server
+    postgres  -->|healthy| init
+    server    -->|healthy| init
+    init      -->|"completed ✓"| jedi
+    server    -->|healthy| jedi
+    server    -->|healthy| harvester
+    mariadb   -->|healthy| harvester
+```
 
 ## Component descriptions
 
@@ -138,25 +154,36 @@ The worker script (`scripts/panda-worker.sh`) parses the PanDA job descriptor
 
 ## Job lifecycle
 
-```
-[client]          [panda-server]     [panda-jedi]    [harvester]
-    │                   │                  │               │
-    ├── submitJob() ───►│                  │               │
-    │                   │ defined          │               │
-    │                   │◄─────────────────┤ activates job │
-    │                   │ activated        │               │
-    │                   │◄─────────────────────────────────┤ getJobs()
-    │                   │ sent             │               │
-    │                   │                 │               ├── panda-worker.sh
-    │                   │                 │               │   (exec transform)
-    │                   │◄─────────────────────────────────┤ updateJobs(running)
-    │                   │ running          │               │
-    │                   │◄─────────────────────────────────┤ updateJobs(transferring)
-    │                   │ transferring     │               │
-    │                   │ [adder daemon processes jobReport.json]
-    │                   │ finished ✓       │               │
-    ├── getJobStatus() ►│                  │               │
-    │◄── {finished} ────┤                  │               │
+```mermaid
+sequenceDiagram
+    participant C as client
+    participant S as panda-server
+    participant J as panda-jedi
+    participant H as harvester
+
+    C->>S: submitJob()
+    Note over S: defined
+
+    J->>S: activateJob()
+    Note over S: activated
+
+    H->>S: getJobs()
+    Note over S: sent
+
+    H->>H: launch panda-worker.sh
+    Note over S: starting
+
+    H->>S: updateJobs(running)
+    Note over S: running
+
+    H->>S: updateJobs(transferring)
+    Note over S: transferring
+
+    Note over S: adder daemon processes jobReport.json
+    Note over S: finished ✓
+
+    C->>S: getJobStatus()
+    S->>C: jobStatus: finished
 ```
 
 End-to-end timing for a trivial job (e.g., `/bin/echo`):
