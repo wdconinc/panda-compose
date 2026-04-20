@@ -27,7 +27,8 @@ inputs:
   env-overrides:
     description: >
       Newline-separated KEY=VALUE pairs appended to the .env file before
-      the stack starts. Use this to override default passwords or ports.
+      the stack starts. Use this to override default passwords or other
+      variables consumed by the compose file or containers.
     default: ''
 
 outputs:

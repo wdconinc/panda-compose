@@ -17,6 +17,7 @@ jobs:
       - name: Setup PanDA stack
         uses: ./
         with:
+          ref: ${{ github.sha }}
           timeout: '300'
 
       - name: Verify Harvester is running

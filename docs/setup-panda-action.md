@@ -26,7 +26,7 @@ Or pin to a specific release:
 | `ref` | `main` | Git ref (branch, tag, SHA) of `eic/panda-compose` to check out. Useful when you need a specific version of the stack config. |
 | `timeout` | `300` | Seconds to wait for the PanDA server to become healthy. |
 | `project-name` | `panda-compose` | Docker Compose project name. Determines container name prefixes (e.g. `panda-compose-panda-jedi-1`). Change only if the default conflicts with other services on the runner. |
-| `env-overrides` | `""` | Newline-separated `KEY=VALUE` pairs appended to `.env` before the stack starts. Use this to override default passwords or ports. |
+| `env-overrides` | `""` | Newline-separated `KEY=VALUE` pairs appended to `.env` before the stack starts. Use this to override environment-based settings such as default passwords; published host ports remain fixed by the compose file. |
 
 ## Outputs
 
