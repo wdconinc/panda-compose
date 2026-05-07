@@ -79,6 +79,7 @@ jobs:
 
           echo "=== Waiting for job to reach finished/failed (timeout 10 min) ==="
           DEADLINE=$((SECONDS + 600))
+          POLL=0
           while [[ $SECONDS -lt $DEADLINE ]]; do
             STATUS_JSON=$(python3 $PANDA_COMPOSE_DIR/scripts/pandajob-status "$JOB_ID")
             JOB_STATUS=$(echo "$STATUS_JSON" | python3 -c "import sys,json; print(json.load(sys.stdin)['jobStatus'])")
@@ -91,11 +92,36 @@ jobs:
               failed|cancelled)
                 echo "ERROR: job ended in terminal state '$JOB_STATUS'"
                 echo "$STATUS_JSON"
-                exit 1
+                # Fall through to diagnostics before exiting
+                POLL=3
                 ;;
             esac
+
+            # Dump diagnostics every 4 polls (~60 s) so stuck jobs are visible.
+            POLL=$(( (POLL + 1) % 4 ))
+            if [[ "$POLL" -eq 0 ]]; then
+              echo "--- [diag] worker containers ---"
+              docker ps -a --filter 'name=harvester-worker' \
+                --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}' 2>/dev/null || true
+              echo "--- [diag] harvester log (last 30 lines) ---"
+              docker logs --tail=30 ${PANDA_COMPOSE_PROJECT}-harvester-1 2>&1 || true
+              echo "--- [diag] harvester worker table ---"
+              docker exec ${PANDA_COMPOSE_PROJECT}-mariadb-1 \
+                mysql -u harvester -pharvester_secret harvester_db \
+                -e "SELECT workerID, status, nativeStatus, LEFT(batchID,12) AS batchID, submissionHost FROM worker_table ORDER BY workerID DESC LIMIT 10;" \
+                2>/dev/null || true
+              echo "---"
+            fi
+
+            [[ "$JOB_STATUS" == "failed" || "$JOB_STATUS" == "cancelled" ]] && exit 1
             sleep 15
           done
+
+          echo "--- [diag] final harvester log ---"
+          docker logs --tail=60 ${PANDA_COMPOSE_PROJECT}-harvester-1 2>&1 || true
+          echo "--- [diag] final worker containers ---"
+          docker ps -a --filter 'name=harvester-worker' \
+            --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}' 2>/dev/null || true
 
           if [[ "$JOB_STATUS" != "finished" ]]; then
             echo "ERROR: job did not reach 'finished' within 10 minutes (last status: $JOB_STATUS)"
