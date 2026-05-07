@@ -103,12 +103,19 @@ jobs:
               echo "--- [diag] worker containers ---"
               docker ps -a --filter 'name=harvester-worker' \
                 --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}' 2>/dev/null || true
-              echo "--- [diag] harvester log (last 30 lines) ---"
-              docker logs --tail=30 ${PANDA_COMPOSE_PROJECT}-harvester-1 2>&1 || true
-              echo "--- [diag] harvester worker table ---"
+              echo "--- [diag] harvester job_fetcher log ---"
+              docker exec ${PANDA_COMPOSE_PROJECT}-harvester-1 \
+                tail -n 15 /var/log/harvester/panda-job_fetcher.log 2>/dev/null || true
+              echo "--- [diag] harvester submitter log ---"
+              docker exec ${PANDA_COMPOSE_PROJECT}-harvester-1 \
+                tail -n 15 /var/log/harvester/panda-submitter.log 2>/dev/null || true
+              echo "--- [diag] harvester docker_submitter log ---"
+              docker exec ${PANDA_COMPOSE_PROJECT}-harvester-1 \
+                tail -n 15 /var/log/harvester/panda-docker_submitter.log 2>/dev/null || true
+              echo "--- [diag] harvester work_table ---"
               docker exec ${PANDA_COMPOSE_PROJECT}-mariadb-1 \
-                mysql -u harvester -pharvester_secret harvester_db \
-                -e "SELECT workerID, status, nativeStatus, LEFT(batchID,12) AS batchID, submissionHost FROM worker_table ORDER BY workerID DESC LIMIT 10;" \
+                mysql -uharvester -pharvester_secret harvester_db \
+                -e "SELECT workerID, status, nativeStatus, LEFT(batchID,12) AS batchID FROM work_table ORDER BY workerID DESC LIMIT 10;" \
                 2>/dev/null || true
               echo "---"
             fi
@@ -117,8 +124,15 @@ jobs:
             sleep 15
           done
 
-          echo "--- [diag] final harvester log ---"
-          docker logs --tail=60 ${PANDA_COMPOSE_PROJECT}-harvester-1 2>&1 || true
+          echo "--- [diag] final harvester submitter log ---"
+          docker exec ${PANDA_COMPOSE_PROJECT}-harvester-1 \
+            tail -n 30 /var/log/harvester/panda-submitter.log 2>/dev/null || true
+          echo "--- [diag] final docker_submitter log ---"
+          docker exec ${PANDA_COMPOSE_PROJECT}-harvester-1 \
+            tail -n 30 /var/log/harvester/panda-docker_submitter.log 2>/dev/null || true
+          echo "--- [diag] final docker_monitor log ---"
+          docker exec ${PANDA_COMPOSE_PROJECT}-harvester-1 \
+            tail -n 30 /var/log/harvester/panda-docker_monitor.log 2>/dev/null || true
           echo "--- [diag] final worker containers ---"
           docker ps -a --filter 'name=harvester-worker' \
             --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}' 2>/dev/null || true
