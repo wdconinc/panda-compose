@@ -1,8 +1,8 @@
 # panda-compose
 
-A self-contained Docker Compose stack for running a local PanDA workload management
-system. Designed for development and CI testing of tools that integrate with PanDA,
-such as CI executors, workflow managers, and custom Harvester plugins.
+A self-contained Docker Compose stack for running a local [PanDA](https://pandawms.org) workload management
+system. Designed for development and CI testing of tools that integrate with
+[PanDA](https://github.com/PanDAWMS/), such as CI executors, workflow managers, and custom Harvester plugins.
 
 This repository mirrors the component set of
 [panda-k8s](https://github.com/PanDAWMS/panda-k8s) but expressed as a single
