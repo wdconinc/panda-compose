@@ -38,7 +38,12 @@ def parse_args():
     group = p.add_mutually_exclusive_group(required=True)
     group.add_argument("--script", metavar="FILE",
                        help="Shell script on the host filesystem; its content is "
-                            "inlined and executed via 'sh -c' inside the worker container")
+                            "inlined and executed via 'sh -c' inside the worker container. "
+                            "Scripts must be POSIX sh-compatible (bash-specific features "
+                            "such as arrays, [[, or (( )) may fail). "
+                            "WARNING: the script content is stored in the PanDA database "
+                            "and may appear in server/harvester logs — do not embed "
+                            "credentials or secrets.")
     group.add_argument("--transformation", help="Executable to run directly (e.g. /bin/echo)")
     p.add_argument("--params", default="", help="Job parameters string (used with --transformation)")
     p.add_argument("--container", default=None, metavar="IMAGE",
@@ -61,8 +66,15 @@ def main():
         if not os.path.isfile(script_path):
             print(f"ERROR: script not found: {script_path}", file=sys.stderr)
             sys.exit(1)
-        with open(script_path) as fh:
-            content = fh.read()
+        try:
+            with open(script_path, encoding="utf-8", errors="strict") as fh:
+                content = fh.read()
+        except OSError as exc:
+            print(f"ERROR: cannot read script {script_path}: {exc}", file=sys.stderr)
+            sys.exit(1)
+        except UnicodeDecodeError as exc:
+            print(f"ERROR: script {script_path} is not valid UTF-8: {exc}", file=sys.stderr)
+            sys.exit(1)
         # Inline the script content as: sh -c '<content>'
         # shlex.quote produces a correctly single-quoted POSIX string; the
         # DockerSubmitter side calls shlex.split() which is the matching inverse.

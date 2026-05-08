@@ -36,7 +36,7 @@ On success a single integer job ID is printed to stdout.
 |---|---|---|
 | `--site SITE` | `PANDA_COMPOSE_LOCAL` | PanDA compute site / queue name |
 | `--transformation PATH` | — | Binary to execute inside the worker container |
-| `--script FILE` | — | Shell script on the **host** filesystem; its content is inlined and run via `sh -c` inside the worker container |
+| `--script FILE` | — | Shell script on the **host** filesystem; its content is inlined and run via `sh -c` inside the worker container (must be POSIX `sh`-compatible) |
 | `--params STRING` | `""` | Arguments passed to the transformation |
 | `--container IMAGE` | *(queue default)* | Docker image for the job worker (e.g. `python:3.12-alpine`) |
 | `--name NAME` | `panda-compose-job` | Human-readable job label |
@@ -48,6 +48,15 @@ On success a single integer job ID is printed to stdout.
 > its content as `sh -c '<content>'` inside the worker container.  No volume
 > mount is required; the script works with any container image that has `sh`.
 > Use `--container IMAGE` to select the image (default: `alpine:latest`).
+> Scripts must be POSIX `sh`-compatible — bash-specific features (arrays,
+> `[[`, `(( ))`, process substitution) may fail in minimal images.  For
+> bash-dependent scripts, use a bash-capable image and run:
+> `--transformation bash --params "-c 'your command'"`.
+>
+> **⚠ Data exposure:** the script content is stored verbatim in the PanDA
+> database (`jobparameters` column) and may appear in server or harvester
+> logs.  Do not embed credentials, tokens, or other secrets in `--script`
+> files.
 
 ## Query job status
 
